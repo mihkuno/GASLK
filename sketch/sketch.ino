@@ -1,20 +1,27 @@
 #include <WiFi.h>
 #include <LiquidCrystal_I2C.h>
+#include <HardwareSerial.h>
 
-#define BLYNK_TEMPLATE_ID      "TMPL60_lVpwjr"
-#define BLYNK_TEMPLATE_NAME    "Gaslynk"
-#define BLYNK_AUTH_TOKEN       "D0y32qZ1nsB7kZIt5pozdGeTXxE_0LQj"
+#define BLYNK_TEMPLATE_ID   "TMPL6WakHUI6j"
+#define BLYNK_TEMPLATE_NAME "gaslynk"
+#define BLYNK_AUTH_TOKEN    "V7qSUHyZU5S_gJdjbjXdKB8XjwWq395J"
 #include <BlynkSimpleEsp32.h>
 
-#define LED_PIN 14 
-#define MQ9_PIN 34
-#define MQ7_PIN 33
-#define MQ2_PIN 32
+// Updated ESP32 pin assignments
+#define LED_PIN 2          // Onboard LED for ESP32
+#define MQ9_PIN 35         // GPIO35 (ADC pin for MQ9 sensor)
+#define MQ7_PIN 34         // GPIO34 (ADC pin for MQ7 sensor)
+#define MQ2_PIN 33         // GPIO33 (ADC pin for MQ2 sensor)
+#define RX_PIN 16          // GPIO16 for SIM900A RX
+#define TX_PIN 17          // GPIO17 for SIM900A TX
 
+HardwareSerial mySerial(1);  // Use HardwareSerial for SIM900A communication
 LiquidCrystal_I2C lcd(0x27, 20, 4);  // Set the LCD address to 0x27 for a 20 chars and 4 line display
 
-const char* ssid = "PLDTHOMEFIBRdbb60";   // Your Wi-Fi SSID
-const char* password = "PLDTWIFIfbwm9";   // Your Wi-Fi Password
+const char* ssid = "gaslynk";   // Your Wi-Fi SSID
+const char* password = "gaslynk123";   // Your Wi-Fi Password
+const char* reciever = "+639951140576"; // Your phone number
+const char* message = "ALERT: High gas levels detected!";
 
 float mq2_val = 0;
 float mq7_val = 0;
@@ -26,13 +33,19 @@ void setup() {
   pinMode(MQ2_PIN, INPUT);
   pinMode(MQ7_PIN, INPUT);
   pinMode(MQ9_PIN, INPUT);
+  
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
 
+  // Start serial communication for debugging
+  Serial.begin(115200);
+  
+  // Initialize HardwareSerial for SIM900A
+  mySerial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN); // Set RX, TX pins for SIM900A
+  
   lcd.init();                     
   lcd.backlight();
 
-  // Connect to Wi-Fi
-  WiFi.begin(ssid, password);
-  
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Connecting WiFi");
@@ -67,7 +80,7 @@ void loop() {
   mq9_val = analogRead(MQ9_PIN);
 
   // Convert to voltage
-  mq2_val *= (3.3 / 4095.0);
+  mq2_val *= (3.3 / 4095.0);  // ESP32 ADC resolution is 12-bit (0-4095)
   mq7_val *= (3.3 / 4095.0);
   mq9_val *= (3.3 / 4095.0);
 
@@ -75,7 +88,10 @@ void loop() {
   if (mq2_val >= 1.0 || mq7_val >= 1.0 || mq9_val >= 1.0) { 
     digitalWrite(LED_PIN, HIGH); 
     // Send alert notification to Blynk
-    Blynk.logEvent("gas_alert", "High gas levels detected!");
+    Blynk.logEvent("gas_alert", message);
+
+    // Send text message notification
+    SendMessage(message, reciever);
   } else { 
     digitalWrite(LED_PIN, LOW);  
   }
@@ -103,8 +119,31 @@ void loop() {
   lcd.setCursor(12, 1);
   lcd.print(String(mq9_val));
 
-  // Run Blynk
-  Blynk.run();
+  delay(1000);
+}
+
+void SendMessage(const char* msg, const char* phoneNumber) {
+  // Send "AT" command to check SIM900A status
+  mySerial.println("AT");
+  delay(1000);
   
-  delay(1000); // Update every second
+  // Set SMS mode to text
+  mySerial.println("AT+CMGF=1");
+  delay(1000);
+
+  // Send the recipient's phone number
+  mySerial.print("AT+CMGS=\"");
+  mySerial.print(phoneNumber);
+  mySerial.println("\"");  
+  delay(1000);
+
+  // Send the message content
+  mySerial.print(msg);
+  mySerial.write(26);  // Send Ctrl+Z to send the message
+  delay(1000);
+
+  // Print any responses from the SIM900A for debugging
+  while (mySerial.available()) {
+    Serial.write(mySerial.read());
+  }
 }
